@@ -39,6 +39,7 @@ from src.utils import get_results, save_results, load_json, get_arg_groups
 from src.test import test, testSBHMM, verify_simple, return_average_ll_per_sign, verify_zahoor
 from joblib import Parallel, delayed
 from statistics import mean
+from src.data_augmentation import DataAugmentation
 
 def returnUserDependentSplits(unique_users, htk_filepaths, test_size):
     splits = [[[],[]] for i in range(len(unique_users))]
@@ -219,8 +220,63 @@ def main():
                         choices=['recognition', 'verification'])
     parser.add_argument('--acceptance_threshold', default=-150)
     
+    # Arguments for data augmentation
+    parser.add_argument('--data_augmentation', action='store_true')
+    parser.add_argument('--rotationsX', type=str, default="-5_0_5")
+    parser.add_argument('--rotationsY', type=str, default="-5_0_5")
+    parser.add_argument('--bodypix_model', type=int, default=1)
+    parser.add_argument('--autoTranslate', type=bool, default=True)
+    parser.add_argument('--pointForAutoTranslateX', type=int, default=3840 // 2)
+    parser.add_argument('--pointForAutoTranslateY', type=int, default=2160 // 2)
+    parser.add_argument('--exportVideo', type=bool, default=False)
+    parser.add_argument('--useOpenCVProjectPoints', type=bool, default=False)
+    parser.add_argument('--numGpu', type=int, default=0)
+
+    
     args = parser.parse_args()
     ########################################################################################
+    features_config = load_json('configs/features.json')
+
+    #if args.users: args.users = [user.capitalize() for user in args.users]
+    
+    if args.data_augmentation:
+        print("Data augmentation is enabled -- Prepare Data will be enabled by default")
+        print("RotationsX:", [int(x) for x in args.rotationsX.split("_")])
+        print("RotationsY:", [int(x) for x in args.rotationsY.split("_")])
+        print("Bodypix model:", args.bodypix_model)
+        print("Auto translate:", args.autoTranslate)
+        print("Point for auto translate:", args.pointForAutoTranslateX, args.pointForAutoTranslateY)
+        print("Export video:", args.exportVideo)
+        print("Use opencv project points:", args.useOpenCVProjectPoints)
+        print("Use GPU:", args.useGpu)
+        args.rotationsX = [int(x) for x in args.rotationsX.split("_")]
+        args.rotationsY = [int(x) for x in args.rotationsY.split("_")]
+        args.pointForAutoTranslateX = int(args.pointForAutoTranslateX)
+        args.pointForAutoTranslateY = int(args.pointForAutoTranslateY)
+        args.bodypix_model = int(args.bodypix_model)
+        args.autoTranslate = bool(args.autoTranslate)
+        args.exportVideo = bool(args.exportVideo)
+        args.useOpenCVProjectPoints = bool(args.useOpenCVProjectPoints)
+        args.numGpu = int(args.numGpu)
+        # The Data augmentation object does all the bounds checking, so you dont have to worry about that
+        da = DataAugmentation(
+            datasetFolder=features_config['raw_videos_dir'], 
+            outputPath=f"{features_config['features_dir']}/augmented", 
+            rotationsX=args.rotationsX, 
+            rotationsY=args.rotationsY, 
+            useBodyPixModel=args.bodypix_model, 
+            pointForAutoTranslate=(args.pointForAutoTranslateX, args.pointForAutoTranslateY), 
+            autoTranslate=args.autoTranslate,
+            numCpus=args.parallel_jobs,
+            exportVideo=args.exportVideo,
+            useOpenCVProjectPoints=args.useOpenCVProjectPoints,
+            useGpu=args.numGpu
+        )
+        # listOfAugmentedVideos is a list of strings of the locations of all the augmented videos
+        da.createDataAugmentedVideos()
+        
+        # Prepare data for all the augmented videos
+        prepare_data(features_config, args.users, args.parallel_jobs)
 
     cross_val_methods = {'kfold': (KFold, True),
                          'leave_one_phrase_out': (LeaveOneGroupOut(), True),
